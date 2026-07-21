@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TomAItrix – ESP32 Pesticide Rover Dashboard</title>
+  <meta name="description" content="Real-time tomato disease detection and rover control dashboard for ESP32-CAM pesticide rover." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    /* ================================================================
+       Design Tokens & Reset
+    ================================================================ */
+    :root {
+      --bg-0: #0a0e1a;
+      --bg-1: #0f1525;
+      --bg-2: #151d33;
+      --bg-3: #1c2540;
+      --glass: rgba(21, 29, 51, 0.7);
+      --glass-border: rgba(100, 140, 255, 0.15);
+      --accent: #4f8aff;
+      --accent-2: #7b5fff;
+      --green: #22d68a;
+      --yellow: #fbbf24;
+      --red: #f87171;
+      --orange: #fb923c;
+      --text-1: #e8eeff;
+      --text-2: #8899cc;
+      --text-3: #556088;
+      --radius: 16px;
+      --radius-sm: 10px;
+      --shadow: 0 8px 32px rgba(0,0,0,0.4);
+      --glow-accent: 0 0 24px rgba(79,138,255,0.25);
+      --glow-green: 0 0 20px rgba(34,214,138,0.3);
+      --glow-red: 0 0 20px rgba(248,113,113,0.3);
+      --transition: 0.2s ease;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-0);
+      color: var(--text-1);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Animated gradient background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80vw 60vh at 20% 10%, rgba(79,138,255,0.07) 0%, transparent 70%),
+        radial-gradient(ellipse 60vw 50vh at 80% 80%, rgba(123,95,255,0.06) 0%, transparent 70%),
+        radial-gradient(ellipse 40vw 40vh at 60% 30%, rgba(34,214,138,0.04) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ================================================================
+       Layout
+    ================================================================ */
+    .page { position: relative; z-index: 1; }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 28px;
+      background: var(--glass);
+      border-bottom: 1px solid var(--glass-border);
+      backdrop-filter: blur(20px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 40px; height: 40px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      box-shadow: var(--glow-accent);
+    }
+
+    .logo-text {
+      font-size: 1.2rem;
+      font-weight: 800;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+
+    .logo-sub {
+      font-size: 0.7rem;
+      color: var(--text-3);
+      font-weight: 400;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .header-status {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: var(--bg-3);
+      border: 1px solid var(--glass-border);
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--text-2);
+      transition: var(--transition);
+    }
+
+    .status-pill .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--text-3);
+      transition: var(--transition);
+    }
+
+    .status-pill.connected .dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .status-pill.connected { color: var(--text-1); }
+    .status-pill.disconnected .dot { background: var(--red); }
+    .status-pill.error .dot { background: var(--orange); }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      grid-template-rows: auto auto;
+      gap: 20px;
+      padding: 24px 28px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    /* ================================================================
+       Glass Card Base
+    ================================================================ */
+    .card {
+      background: var(--glass);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      backdrop-filter: blur(20px);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--glass-border);
+    }
+
+    .card-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-2);
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ================================================================
+       Video Feed
+    ================================================================ */
+    .video-card {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .video-wrapper {
+      position: relative;
+      background: #000;
+      min-height: 420px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #video-feed {
+      width: 100%;
+      height: 420px;
+      object-fit: cover;
+      display: block;
+      border-radius: 0;
+    }
+
+    .video-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    /* Scanning animation */
+    .scan-line {
+      position: absolute;
+      left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      animation: scan 3s linear infinite;
+      opacity: 0.7;
+    }
+
+    @keyframes scan {
+      0%   { top: 0%;   opacity: 0; }
+      5%   { opacity: 0.7; }
+      95%  { opacity: 0.7; }
+      100% { top: 100%; opacity: 0; }
+    }
+
+    /* Corner decorations */
+    .corner {
+      position: absolute;
+      width: 20px; height: 20px;
+      border-color: var(--accent);
+      border-style: solid;
+      opacity: 0.6;
+    }
+    .corner-tl { top: 12px; left: 12px; border-width: 2px 0 0 2px; border-radius: 2px 0 0 0; }
+    .corner-tr { top: 12px; right: 12px; border-width: 2px 2px 0 0; border-radius: 0 2px 0 0; }
+    .corner-bl { bottom: 12px; left: 12px; border-width: 0 0 2px 2px; border-radius: 0 0 0 2px; }
+    .corner-br { bottom: 12px; right: 12px; border-width: 0 2px 2px 0; border-radius: 0 0 2px 0; }
+
+    .video-no-stream {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      color: var(--text-3);
+      font-size: 0.9rem;
+    }
+
+    .video-no-stream .icon { font-size: 3rem; opacity: 0.4; }
+
+    .stream-badge {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--text-2);
+      backdrop-filter: blur(8px);
+    }
+
+    .stream-badge.live { color: var(--red); border-color: rgba(248,113,113,0.3); }
+    .stream-badge.live .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); animation: pulse 1.2s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    /* Prediction overlay on video */
+    .video-prediction-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0; right: 0;
+      padding: 14px 18px;
+      background: linear-gradient(0deg, rgba(0,0,0,0.85) 0%, transparent 100%);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .pred-label {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .pred-conf {
+      font-size: 0.8rem;
+      color: var(--text-2);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* ================================================================
+       Prediction Panel (right side)
+    ================================================================ */
+    .prediction-card {
+      grid-column: 2;
+      grid-row: 1 / 3;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Current disease result */
+    .disease-result {
+      padding: 20px;
+      position: relative;
+    }
+
+    .severity-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+
+    .severity-none    { background: rgba(34,214,138,0.15); color: var(--green);  border: 1px solid rgba(34,214,138,0.3); }
+    .severity-low     { background: rgba(251,191,36,0.12); color: var(--yellow); border: 1px solid rgba(251,191,36,0.3); }
+    .severity-medium  { background: rgba(251,146,60,0.12); color: var(--orange); border: 1px solid rgba(251,146,60,0.3); }
+    .severity-high    { background: rgba(248,113,113,0.15); color: var(--red);   border: 1px solid rgba(248,113,113,0.3); }
+    .severity-unknown { background: rgba(136,153,204,0.12); color: var(--text-2); border: 1px solid var(--glass-border); }
+
+    .disease-name {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: var(--text-1);
+      margin-bottom: 4px;
+      line-height: 1.2;
+    }
+
+    .confidence-bar-wrap {
+      margin: 14px 0;
+    }
+
+    .confidence-bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.72rem;
+      color: var(--text-3);
+      margin-bottom: 6px;
+    }
+
+    .confidence-bar {
+      height: 6px;
+      background: var(--bg-3);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .confidence-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .info-section {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .info-block {
+      padding: 12px 14px;
+      background: var(--bg-2);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-sm);
+    }
+
+    .info-block-label {
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--text-3);
+      margin-bottom: 5px;
+    }
+
+    .info-block-text {
+      font-size: 0.8rem;
+      color: var(--text-2);
+      line-height: 1.5;
+    }
+
+    /* Alert history */
+    .alert-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .alert-list::-webkit-scrollbar { width: 4px; }
+    .alert-list::-webkit-scrollbar-track { background: transparent; }
+    .alert-list::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 2px; }
+
+    .alert-item {
+      padding: 10px 14px;
+      background: var(--bg-2);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-sm);
+      border-left: 3px solid var(--text-3);
+      font-size: 0.78rem;
+      animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-10px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .alert-item.high   { border-left-color: var(--red); }
+    .alert-item.medium { border-left-color: var(--orange); }
+    .alert-item.low    { border-left-color: var(--yellow); }
+
+    .alert-disease { font-weight: 600; color: var(--text-1); }
+    .alert-meta    { color: var(--text-3); font-size: 0.7rem; margin-top: 2px; font-family: 'JetBrains Mono', monospace; }
+
+    /* ================================================================
+       Rover Controls
+    ================================================================ */
+    .controls-card {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    .controls-body {
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 1fr 200px 1fr;
+      gap: 24px;
+      align-items: center;
+    }
+
+    /* D-Pad */
+    .dpad {
+      display: grid;
+      grid-template-areas:
+        ". up ."
+        "left stop right"
+        ". down .";
+      grid-template-columns: 56px 56px 56px;
+      grid-template-rows: 56px 56px 56px;
+      gap: 6px;
+      justify-content: center;
+    }
+
+    .dpad-btn {
+      appearance: none;
+      border: none;
+      cursor: pointer;
+      border-radius: 10px;
+      background: var(--bg-3);
+      border: 1px solid var(--glass-border);
+      color: var(--text-1);
+      font-size: 1.2rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.12s ease;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .dpad-btn:hover  { background: var(--bg-2); border-color: var(--accent); box-shadow: var(--glow-accent); transform: scale(1.05); }
+    .dpad-btn:active { transform: scale(0.93); background: var(--accent); }
+    .dpad-btn.stop-btn { background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.3); font-size: 0.65rem; font-weight: 700; color: var(--red); letter-spacing: 0.5px; }
+    .dpad-btn.stop-btn:hover { background: rgba(248,113,113,0.2); }
+    .dpad-btn[data-cmd="FORWARD"]  { grid-area: up; }
+    .dpad-btn[data-cmd="BACKWARD"] { grid-area: down; }
+    .dpad-btn[data-cmd="LEFT"]     { grid-area: left; }
+    .dpad-btn[data-cmd="RIGHT"]    { grid-area: right; }
+    .dpad-btn[data-cmd="STOP"]     { grid-area: stop; }
+
+    /* Speed + Pump centre */
+    .controls-centre {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .speed-control label {
+      display: block;
+      font-size: 0.7rem;
+      color: var(--text-3);
+      text-align: center;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    #speed-slider {
+      -webkit-appearance: none;
+      width: 160px;
+      height: 4px;
+      background: var(--bg-3);
+      border-radius: 2px;
+      outline: none;
+    }
+
+    #speed-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      cursor: pointer;
+      box-shadow: var(--glow-accent);
+    }
+
+    #speed-value {
+      font-size: 0.75rem;
+      color: var(--text-2);
+      text-align: center;
+      font-family: 'JetBrains Mono', monospace;
+      margin-top: 4px;
+    }
+
+    /* Spray button */
+    .spray-btn {
+      appearance: none; border: none; cursor: pointer;
+      padding: 12px 28px;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      font-family: 'Inter', sans-serif;
+      transition: all 0.15s ease;
+      display: flex; align-items: center; gap: 8px;
+    }
+
+    .spray-on  { background: linear-gradient(135deg, #22d68a, #15b57b); color: #fff; box-shadow: var(--glow-green); }
+    .spray-off { background: var(--bg-3); border: 1px solid var(--glass-border); color: var(--text-2); }
+    .spray-btn:hover { transform: scale(1.04); }
+    .spray-btn:active { transform: scale(0.96); }
+
+    /* Right side: rover telemetry */
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .tele-box {
+      padding: 12px;
+      background: var(--bg-2);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-sm);
+      text-align: center;
+    }
+
+    .tele-val {
+      font-size: 1.2rem;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent);
+    }
+
+    .tele-label {
+      font-size: 0.65rem;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-top: 2px;
+    }
+
+    /* Server IP config bar at top of controls */
+    .config-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--glass-border);
+      background: var(--bg-2);
+    }
+
+    .config-bar label {
+      font-size: 0.72rem;
+      color: var(--text-3);
+      white-space: nowrap;
+    }
+
+    .config-bar input {
+      flex: 1;
+      background: var(--bg-3);
+      border: 1px solid var(--glass-border);
+      color: var(--text-1);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-family: 'JetBrains Mono', monospace;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+
+    .config-bar input:focus { border-color: var(--accent); }
+
+    .config-btn {
+      padding: 6px 14px;
+      background: var(--accent);
+      border: none; cursor: pointer;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.75rem;
+      font-weight: 600;
+      font-family: 'Inter', sans-serif;
+      transition: var(--transition);
+    }
+
+    .config-btn:hover { background: var(--accent-2); }
+
+    /* ================================================================
+       Responsive
+    ================================================================ */
+    @media (max-width: 1024px) {
+      .main-grid {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+      }
+      .prediction-card { grid-column: 1; grid-row: 2; }
+      .controls-card   { grid-column: 1; grid-row: 3; }
+    }
+
+    @media (max-width: 640px) {
+      header { padding: 14px 16px; }
+      .main-grid { padding: 16px; gap: 14px; }
+      .controls-body { grid-template-columns: 1fr; }
+      .telemetry-grid { display: none; }
+    }
+
+    /* ================================================================
+       Utility
+    ================================================================ */
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    .text-accent { color: var(--accent); }
+    .empty-state { text-align: center; color: var(--text-3); font-size: 0.8rem; padding: 20px; }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============================================================
+       Header
+  ============================================================ -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🌿</div>
+      <div>
+        <div class="logo-text">TomAItrix</div>
+        <div class="logo-sub">ESP32 Pesticide Rover</div>
+      </div>
+    </div>
+    <div class="header-status">
+      <div class="status-pill" id="pill-server">
+        <span class="dot"></span><span>Server</span>
+      </div>
+      <div class="status-pill" id="pill-cam">
+        <span class="dot"></span><span>ESP32-CAM</span>
+      </div>
+      <div class="status-pill" id="pill-control">
+        <span class="dot"></span><span>Rover</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================================================
+       Main Grid
+  ============================================================ -->
+  <main class="main-grid">
+
+    <!-- ── Video Feed ── -->
+    <div class="card video-card" id="video-card">
+      <div class="card-header">
+        <span class="card-title">📷 Live Camera Feed</span>
+        <span id="fps-display" class="mono" style="font-size:0.75rem;color:var(--text-3)">-- fps</span>
+      </div>
+      <div class="video-wrapper">
+        <img id="video-feed" src="" alt="ESP32-CAM MJPEG Stream" style="display:none" />
+        <div class="video-no-stream" id="no-stream">
+          <div class="icon">📡</div>
+          <div>Waiting for stream...</div>
+          <div style="font-size:0.72rem;color:var(--text-3);margin-top:4px">Set server IP below and connect</div>
+        </div>
+        <div class="video-overlay" id="video-overlay" style="display:none">
+          <div class="scan-line"></div>
+          <div class="corner corner-tl"></div>
+          <div class="corner corner-tr"></div>
+          <div class="corner corner-bl"></div>
+          <div class="corner corner-br"></div>
+          <div class="stream-badge live" id="live-badge">
+            <span class="dot"></span> LIVE
+          </div>
+          <div class="video-prediction-bar">
+            <span class="pred-label" id="overlay-disease">--</span>
+            <span class="pred-conf" id="overlay-conf">--</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Right Prediction Panel ── -->
+    <div class="prediction-card">
+
+      <!-- Current prediction result -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">🔬 Disease Detection</span>
+          <span id="last-updated" style="font-size:0.68rem;color:var(--text-3)" class="mono">--:--:--</span>
+        </div>
+        <div class="disease-result">
+          <div class="severity-indicator severity-unknown" id="severity-badge">● SCANNING</div>
+          <div class="disease-name" id="disease-name">Initialising...</div>
+
+          <div class="confidence-bar-wrap">
+            <div class="confidence-bar-label">
+              <span>Confidence</span>
+              <span id="conf-pct" class="mono">0%</span>
+            </div>
+            <div class="confidence-bar">
+              <div class="confidence-fill" id="conf-fill" style="width:0%"></div>
+            </div>
+          </div>
+
+          <div class="info-section">
+            <div class="info-block">
+              <div class="info-block-label">🔬 Stage</div>
+              <div class="info-block-text" id="info-stage">--</div>
+            </div>
+            <div class="info-block">
+              <div class="info-block-label">⚠️ Cause</div>
+              <div class="info-block-text" id="info-cause">--</div>
+            </div>
+            <div class="info-block">
+              <div class="info-block-label">💊 Prevention</div>
+              <div class="info-block-text" id="info-prev">--</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Alert log -->
+      <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:200px">
+        <div class="card-header">
+          <span class="card-title">🚨 Alert History</span>
+          <button onclick="clearAlerts()" style="background:none;border:none;color:var(--text-3);font-size:0.72rem;cursor:pointer;font-family:inherit">Clear</button>
+        </div>
+        <div class="alert-list" id="alert-list">
+          <div class="empty-state">No disease alerts yet</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Rover Controls ── -->
+    <div class="card controls-card">
+      <!-- Server / ESP32 config bar -->
+      <div class="config-bar">
+        <label for="server-ip">Server IP</label>
+        <input type="text" id="server-ip" value="http://localhost:8000" placeholder="http://192.168.1.100:8000" />
+        <button class="config-btn" onclick="reconnect()">Connect</button>
+      </div>
+
+      <div class="card-header">
+        <span class="card-title">🕹️ Rover Controls</span>
+        <span id="cmd-status" style="font-size:0.72rem;color:var(--text-3)">–</span>
+      </div>
+
+      <div class="controls-body">
+        <!-- D-Pad -->
+        <div>
+          <div style="font-size:0.68rem;color:var(--text-3);text-align:center;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px">Navigation</div>
+          <div class="dpad">
+            <button class="dpad-btn" data-cmd="FORWARD"  title="Forward"  id="btn-forward">▲</button>
+            <button class="dpad-btn" data-cmd="LEFT"     title="Left"     id="btn-left">◀</button>
+            <button class="dpad-btn stop-btn" data-cmd="STOP" title="Stop" id="btn-stop">STOP</button>
+            <button class="dpad-btn" data-cmd="RIGHT"    title="Right"    id="btn-right">▶</button>
+            <button class="dpad-btn" data-cmd="BACKWARD" title="Backward" id="btn-backward">▼</button>
+          </div>
+        </div>
+
+        <!-- Centre: speed + spray -->
+        <div class="controls-centre">
+          <div class="speed-control">
+            <label for="speed-slider">Motor Speed</label>
+            <input type="range" id="speed-slider" min="50" max="255" value="180" oninput="updateSpeed(this.value)" />
+            <div id="speed-value">180 / 255</div>
+          </div>
+
+          <button class="spray-btn spray-off" id="spray-btn" onclick="toggleSpray()">
+            💧 SPRAY
+          </button>
+        </div>
+
+        <!-- Telemetry -->
+        <div>
+          <div style="font-size:0.68rem;color:var(--text-3);text-align:center;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px">Telemetry</div>
+          <div class="telemetry-grid">
+            <div class="tele-box">
+              <div class="tele-val" id="tele-rssi">--</div>
+              <div class="tele-label">RSSI (dBm)</div>
+            </div>
+            <div class="tele-box">
+              <div class="tele-val" id="tele-alerts">0</div>
+              <div class="tele-label">Alerts</div>
+            </div>
+            <div class="tele-box">
+              <div class="tele-val" id="tele-frames">0</div>
+              <div class="tele-label">Frames</div>
+            </div>
+            <div class="tele-box">
+              <div class="tele-val" id="tele-subs">0</div>
+              <div class="tele-label">Clients</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ================================================================
+//  Configuration
+// ================================================================
+let SERVER = (document.getElementById('server-ip').value).replace(/\/$/, '');
+let sseSource = null;
+let sprayActive = false;
+let frameCount = 0;
+let lastFrameTime = Date.now();
+let alertCount = 0;
+let statusInterval = null;
+
+// ================================================================
+//  Connection management
+// ================================================================
+function reconnect() {
+  SERVER = document.getElementById('server-ip').value.replace(/\/$/, '');
+  setupStream();
+  setupSSE();
+  startStatusPolling();
+  setPill('pill-server', 'connecting');
+}
+
+function setPill(id, state) {
+  const el = document.getElementById(id);
+  el.classList.remove('connected', 'disconnected', 'error');
+  if (state === 'connected')    el.classList.add('connected');
+  if (state === 'disconnected') el.classList.add('disconnected');
+  if (state === 'error')        el.classList.add('error');
+}
+
+// ================================================================
+//  MJPEG Stream
+// ================================================================
+function setupStream() {
+  const img = document.getElementById('video-feed');
+  const noStream = document.getElementById('no-stream');
+  const overlay = document.getElementById('video-overlay');
+  const streamUrl = `${SERVER}/stream?t=${Date.now()}`;
+
+  img.onload = () => {
+    noStream.style.display = 'none';
+    img.style.display = 'block';
+    overlay.style.display = 'block';
+    setPill('pill-cam', 'connected');
+    trackFPS();
+  };
+
+  img.onerror = () => {
+    noStream.style.display = 'flex';
+    img.style.display = 'none';
+    overlay.style.display = 'none';
+    setPill('pill-cam', 'disconnected');
+  };
+
+  img.src = streamUrl;
+}
+
+function trackFPS() {
+  frameCount++;
+  const now = Date.now();
+  const elapsed = (now - lastFrameTime) / 1000;
+  if (elapsed >= 2) {
+    const fps = (frameCount / elapsed).toFixed(1);
+    document.getElementById('fps-display').textContent = `${fps} fps`;
+    document.getElementById('tele-frames').textContent = frameCount;
+    frameCount = 0;
+    lastFrameTime = now;
+  }
+  // Track next frame via next img repaint
+  requestAnimationFrame(() => {
+    const img = document.getElementById('video-feed');
+    if (img.complete) trackFPS();
+  });
+}
+
+// ================================================================
+//  Server-Sent Events – real-time predictions
+// ================================================================
+function setupSSE() {
+  if (sseSource) { sseSource.close(); sseSource = null; }
+
+  sseSource = new EventSource(`${SERVER}/events`);
+
+  sseSource.onopen = () => setPill('pill-server', 'connected');
+
+  sseSource.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      updatePredictionUI(data);
+    } catch (_) {}
+  };
+
+  sseSource.onerror = () => {
+    setPill('pill-server', 'disconnected');
+    // Retry after 5s
+    setTimeout(setupSSE, 5000);
+  };
+}
+
+// ================================================================
+//  Prediction UI Update
+// ================================================================
+function updatePredictionUI(data) {
+  const disease = data.prediction || 'Unknown';
+  const conf    = data.confidence || 0;
+  const pct     = Math.round(conf * 100);
+  const severity = data.severity || 'unknown';
+
+  // Overlay on video
+  document.getElementById('overlay-disease').textContent = disease;
+  document.getElementById('overlay-conf').textContent    = `${pct}% confidence`;
+
+  // Main panel
+  document.getElementById('disease-name').textContent = disease;
+  document.getElementById('conf-pct').textContent = `${pct}%`;
+  document.getElementById('conf-fill').style.width = `${pct}%`;
+  document.getElementById('info-stage').textContent = data.stage || '--';
+  document.getElementById('info-cause').textContent = data.cause || '--';
+  document.getElementById('info-prev').textContent  = data.prevention || '--';
+
+  // Severity badge
+  const badge = document.getElementById('severity-badge');
+  badge.className = `severity-indicator severity-${severity}`;
+  const icons = { none: '✅', low: '⚠️', medium: '🟠', high: '🔴', unknown: '🔄' };
+  badge.textContent = `${icons[severity] || '●'} ${severity.toUpperCase()}`;
+
+  // Confidence fill colour
+  const fill = document.getElementById('conf-fill');
+  if (conf > 0.8)      fill.style.background = 'linear-gradient(90deg, #22d68a, #15b57b)';
+  else if (conf > 0.5) fill.style.background = 'linear-gradient(90deg, #fbbf24, #f59e0b)';
+  else                 fill.style.background = 'linear-gradient(90deg, #f87171, #ef4444)';
+
+  // Timestamp
+  const ts = new Date(data.timestamp * 1000);
+  document.getElementById('last-updated').textContent =
+    ts.toLocaleTimeString('en-IN', { hour12: false });
+
+  // Add to alert log if diseased
+  if (severity !== 'none' && severity !== 'unknown') {
+    addAlert(data);
+  }
+}
+
+// ================================================================
+//  Alert Log
+// ================================================================
+function addAlert(data) {
+  alertCount++;
+  document.getElementById('tele-alerts').textContent = alertCount;
+
+  const list = document.getElementById('alert-list');
+  const empty = list.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  const item = document.createElement('div');
+  item.className = `alert-item ${data.severity}`;
+  const ts = new Date(data.timestamp * 1000);
+  item.innerHTML = `
+    <div class="alert-disease">${data.prediction}</div>
+    <div class="alert-meta">${ts.toLocaleTimeString('en-IN')} · ${Math.round((data.confidence||0)*100)}% · ${data.stage || ''}</div>
+  `;
+  list.prepend(item);
+
+  // Keep max 50 items
+  while (list.children.length > 50) list.removeChild(list.lastChild);
+}
+
+function clearAlerts() {
+  document.getElementById('alert-list').innerHTML = '<div class="empty-state">No disease alerts yet</div>';
+  alertCount = 0;
+  document.getElementById('tele-alerts').textContent = '0';
+}
+
+// ================================================================
+//  Rover Commands
+// ================================================================
+async function sendCommand(cmd) {
+  const statusEl = document.getElementById('cmd-status');
+  statusEl.textContent = `→ ${cmd}`;
+  statusEl.style.color = 'var(--accent)';
+
+  try {
+    const res = await fetch(`${SERVER}/rover/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: cmd }),
+    });
+
+    if (res.ok) {
+      statusEl.textContent = `✓ ${cmd}`;
+      statusEl.style.color = 'var(--green)';
+      setPill('pill-control', 'connected');
+    } else {
+      statusEl.textContent = `✗ ${cmd} (${res.status})`;
+      statusEl.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    statusEl.textContent = `✗ No connection`;
+    statusEl.style.color = 'var(--red)';
+    setPill('pill-control', 'disconnected');
+  }
+
+  setTimeout(() => { statusEl.style.color = 'var(--text-3)'; }, 1500);
+}
+
+// D-Pad buttons
+document.querySelectorAll('.dpad-btn').forEach(btn => {
+  btn.addEventListener('mousedown',  () => sendCommand(btn.dataset.cmd));
+  btn.addEventListener('touchstart', (e) => { e.preventDefault(); sendCommand(btn.dataset.cmd); });
+});
+
+// Speed slider
+function updateSpeed(val) {
+  document.getElementById('speed-value').textContent = `${val} / 255`;
+  sendCommand(`SPEED:${val}`);
+}
+
+// Spray toggle
+function toggleSpray() {
+  sprayActive = !sprayActive;
+  const btn = document.getElementById('spray-btn');
+  if (sprayActive) {
+    btn.className = 'spray-btn spray-on';
+    btn.textContent = '💧 SPRAYING...';
+    sendCommand('SPRAY');
+  } else {
+    btn.className = 'spray-btn spray-off';
+    btn.textContent = '💧 SPRAY';
+    sendCommand('STOP_SPRAY');
+  }
+}
+
+// Keyboard controls
+document.addEventListener('keydown', (e) => {
+  const map = {
+    'ArrowUp':    'FORWARD',
+    'ArrowDown':  'BACKWARD',
+    'ArrowLeft':  'LEFT',
+    'ArrowRight': 'RIGHT',
+    ' ':          'STOP',
+    's':          'STOP',
+  };
+  if (map[e.key]) { e.preventDefault(); sendCommand(map[e.key]); }
+});
+
+// ================================================================
+//  Status polling
+// ================================================================
+async function pollStatus() {
+  try {
+    const res  = await fetch(`${SERVER}/status`);
+    const data = await res.json();
+    document.getElementById('tele-subs').textContent  = data.sse_subscribers ?? '--';
+    if (data.latest_prediction?.confidence !== undefined) {
+      // silently update if SSE is also running (SSE takes priority)
+    }
+    setPill('pill-server', 'connected');
+  } catch (_) {
+    setPill('pill-server', 'disconnected');
+  }
+}
+
+function startStatusPolling() {
+  if (statusInterval) clearInterval(statusInterval);
+  statusInterval = setInterval(pollStatus, 5000);
+}
+
+// ================================================================
+//  Bootstrap on load
+// ================================================================
+window.addEventListener('load', () => {
+  // Auto-detect: if running from the server (localhost), try to connect immediately
+  reconnect();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.egg-info/
+dist/
+build/
+.env
+.env.local
+venv/
+.venv/
+
+# ONNX runtime cache
+*.ort
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Arduino build artifacts
+*.elf
+*.bin
+*.hex
+build/
+
+# Node (legacy - not used anymore)
+node_modules/
+.next/
