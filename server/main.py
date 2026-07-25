@@ -24,6 +24,7 @@ import threading
 from typing import AsyncGenerator
 
 import numpy as np
+import cv2
 from PIL import Image
 
 try:
@@ -184,11 +185,57 @@ def softmax(x: np.ndarray) -> np.ndarray:
     return e_x / e_x.sum(axis=1, keepdims=True)
 
 
+MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 3, 1, 1)
+STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(1, 3, 1, 1)
+
 def preprocess(image: Image.Image) -> np.ndarray:
     image = image.resize((128, 128), Image.Resampling.BILINEAR).convert("RGB")
     arr = np.array(image, dtype=np.float32) / 255.0
     arr = np.transpose(arr, (2, 0, 1))
-    return np.expand_dims(arr, axis=0)
+    arr = np.expand_dims(arr, axis=0)
+    arr = (arr - MEAN) / STD
+    return arr.astype(np.float32)
+
+
+def is_genuine_tomato_leaf(pil_img: Image.Image):
+    """
+    Multi-Feature Botanical Leaf Image Validator.
+    Rejects non-leaf photos (people, faces, animals, buildings, cars, flat backgrounds, rooms, clothes).
+    """
+    img = pil_img.convert("RGB")
+    cv_img = np.array(img)
+    arr = cv_img.astype(np.float32)
+    r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+    
+    # 1. Laplacian Edge Texture Complexity Check (flat skin, walls, furniture lack leaf vein texture)
+    gray = cv2.cvtColor(cv_img, cv2.COLOR_RGB2GRAY)
+    lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    if lap_var < 15.0:
+        return False, f"Image lacks leaf texture or vein contours (Laplacian var: {lap_var:.1f})."
+
+    hsv = cv2.cvtColor(cv_img, cv2.COLOR_RGB2HSV)
+    h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+
+    # 2. Non-Leaf / Human Skin Tone Object Detection
+    skin_mask = (r > 90) & (g > 40) & (b > 20) & (r > g + 18) & (r > b + 30) & (h <= 25)
+    skin_ratio = float(np.mean(skin_mask))
+    if skin_ratio > 0.30:
+        return False, f"Non-leaf warm tone / human skin object detected (ratio: {skin_ratio*100:.1f}%)."
+
+    # 3. Chlorophyll & Foliage Mask
+    green_foliage = (h >= 25) & (h <= 95) & (s >= 30) & (v >= 25)
+    green_ratio = float(np.mean(green_foliage))
+
+    yellow_foliage = (h >= 15) & (h < 25) & (s >= 40) & (g > b + 25) & (abs(r - g) < 25) & (r > 60)
+    brown_foliage = (h >= 5) & (h < 25) & (s >= 35) & (g > b + 15) & (r - g < 25) & (g > 35)
+
+    total_foliage_ratio = float(np.mean(green_foliage | yellow_foliage | brown_foliage))
+
+    # Reject images that lack sufficient chlorophyll or total plant foliage
+    if green_ratio < 0.08 and total_foliage_ratio < 0.22:
+        return False, f"Image color distribution does not match plant foliage (Green: {green_ratio*100:.1f}%)."
+
+    return True, "Valid Leaf"
 
 
 def run_inference(image: Image.Image) -> dict:
@@ -196,14 +243,47 @@ def run_inference(image: Image.Image) -> dict:
     if not model_loaded or ort_session is None:
         raise RuntimeError("Model not loaded")
 
+    # 1. Multi-Feature Botanical Leaf Image Validation Check
+    is_leaf, leaf_msg = is_genuine_tomato_leaf(image)
+    if not is_leaf:
+        return {
+            "prediction":  "Invalid / Non-Tomato Image",
+            "disease_key": "Invalid_Image",
+            "confidence":  0.0,
+            "class_id":    -1,
+            "stage":       "Not Applicable",
+            "cause":       "The uploaded photo does not contain a recognizable tomato plant leaf.",
+            "prevention":  "Please upload a clear, focused, well-lit photograph of a tomato leaf for disease diagnosis.",
+            "severity":    "unknown",
+            "timestamp":   time.time(),
+        }
+
     tensor = preprocess(image)
     input_name = ort_session.get_inputs()[0].name
     outputs    = ort_session.run(None, {input_name: tensor})
-    probs      = softmax(outputs[0])
+    probs      = softmax(outputs[0])[0]
 
-    idx        = int(np.argmax(probs, axis=1)[0])
-    confidence = float(probs[0][idx])
+    sorted_probs = np.sort(probs)[::-1]
+    top1_conf = float(sorted_probs[0])
+    top2_conf = float(sorted_probs[1])
+    margin_gap = top1_conf - top2_conf
+
+    idx        = int(np.argmax(probs))
     label_key  = str(idx)
+
+    # 2. Strict Confidence (>=82%) & Top-1 vs Top-2 Margin Gap (>=50%) Thresholding
+    if top1_conf < 0.82 or margin_gap < 0.50:
+        return {
+            "prediction":  "Invalid / Non-Tomato Image",
+            "disease_key": "Uncertain_Prediction",
+            "confidence":  top1_conf,
+            "class_id":    -1,
+            "stage":       "Uncertain Prediction",
+            "cause":       f"The AI model is uncertain about this photo (Confidence: {top1_conf*100:.1f}%, Margin: {margin_gap*100:.1f}%). It does not match a clear tomato leaf.",
+            "prevention":  "Please upload a clear, close-up photograph of a tomato leaf.",
+            "severity":    "unknown",
+            "timestamp":   time.time(),
+        }
 
     disease_name = LABELS.get(label_key, "Unknown Disease")
     clean_name   = (
@@ -222,7 +302,7 @@ def run_inference(image: Image.Image) -> dict:
     return {
         "prediction":  clean_name,
         "disease_key": disease_name,
-        "confidence":  confidence,
+        "confidence":  top1_conf,
         "class_id":    idx,
         "stage":       advice["stage"],
         "cause":       advice["cause"],
